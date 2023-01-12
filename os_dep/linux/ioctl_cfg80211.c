@@ -825,8 +825,13 @@ check_bss:
 
 		DBG_871X(FUNC_ADPT_FMT" call cfg80211_roamed\n", FUNC_ADPT_ARG(padapter));
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		roam_info.links[0].channel = notify_channel;
+		roam_info.links[0].bssid = cur_network->network.MacAddress;
+#else
+		roam_info.channel = notify_channel;
 		roam_info.bssid = cur_network->network.MacAddress;
-		roam_info.req_ie = pmlmepriv->assoc_req+sizeof(struct rtw_ieee80211_hdr_3addr)+2;
+#endif
 		roam_info.req_ie_len = pmlmepriv->assoc_req_len-sizeof(struct rtw_ieee80211_hdr_3addr)-2;
 		roam_info.resp_ie = pmlmepriv->assoc_rsp+sizeof(struct rtw_ieee80211_hdr_3addr)+6,
 		roam_info.resp_ie_len = pmlmepriv->assoc_rsp_len-sizeof(struct rtw_ieee80211_hdr_3addr)-6;
@@ -1541,6 +1546,9 @@ exit:
 }
 
 static int cfg80211_rtw_add_key(struct wiphy *wiphy, struct net_device *ndev,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	int link_id,
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)) || defined(COMPAT_KERNEL_RELEASE)
 				u8 key_index, bool pairwise, const u8 *mac_addr,
 #else	// (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37))
@@ -1692,6 +1700,9 @@ addkey_end:
 }
 
 static int cfg80211_rtw_get_key(struct wiphy *wiphy, struct net_device *ndev,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	int link_id,
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)) || defined(COMPAT_KERNEL_RELEASE)
 				u8 key_index, bool pairwise, const u8 *mac_addr,
 #else	// (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37))
@@ -1725,6 +1736,9 @@ static int cfg80211_rtw_get_key(struct wiphy *wiphy, struct net_device *ndev,
 }
 
 static int cfg80211_rtw_del_key(struct wiphy *wiphy, struct net_device *ndev,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+				int link_id,
+#endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)) || defined(COMPAT_KERNEL_RELEASE)
 				u8 key_index, bool pairwise, const u8 *mac_addr)
 #else	// (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37))
@@ -1745,8 +1759,11 @@ static int cfg80211_rtw_del_key(struct wiphy *wiphy, struct net_device *ndev,
 	return 0;
 }
 
-static int cfg80211_rtw_set_default_key(struct wiphy *wiphy,
-	struct net_device *ndev, u8 key_index
+static int cfg80211_rtw_set_default_key(struct wiphy *wiphy, struct net_device *ndev,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	int link_id,
+#endif
+	u8 key_index
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,38)) || defined(COMPAT_KERNEL_RELEASE)
 	, bool unicast, bool multicast
 	#endif
@@ -2432,18 +2449,12 @@ static int cfg80211_rtw_scan(struct wiphy *wiphy
 	#ifdef CONFIG_P2P
 	if( pwdinfo->driver_interface == DRIVER_CFG80211 )
 	{
-		if(ssids->ssid != NULL
-			&& _rtw_memcmp(ssids->ssid, "DIRECT-", 7)
-			&& rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)
-		)
-		{
-			if(rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE))
-			{
+		if (_rtw_memcmp(ssids->ssid, "DIRECT-", 7) &&
+		    rtw_get_p2p_ie((u8 *)request->ie, request->ie_len, NULL, NULL)) {
+			if(rtw_p2p_chk_state(pwdinfo, P2P_STATE_NONE)) {
 				rtw_p2p_enable(padapter, P2P_ROLE_DEVICE);
 				adapter_wdev_data(padapter)->p2p_enabled = _TRUE;
-			}
-			else
-			{
+			} else {
 				rtw_p2p_set_pre_state(pwdinfo, rtw_p2p_state(pwdinfo));
 				#ifdef CONFIG_DEBUG_CFG80211
 				DBG_8192C("%s, role=%d, p2p_state=%d\n", __func__, rtw_p2p_role(pwdinfo), rtw_p2p_state(pwdinfo));
@@ -4327,7 +4338,11 @@ static int cfg80211_rtw_change_beacon(struct wiphy *wiphy, struct net_device *nd
 	return ret;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 2)
 static int cfg80211_rtw_stop_ap(struct wiphy *wiphy, struct net_device *ndev)
+#else
+static int cfg80211_rtw_stop_ap(struct wiphy *wiphy, struct net_device *ndev, unsigned int link_id)
+#endif
 {
 	DBG_871X(FUNC_NDEV_FMT"\n", FUNC_NDEV_ARG(ndev));
 	return 0;
@@ -6794,7 +6809,11 @@ void rtw_wdev_unregister(struct wireless_dev *wdev)
 	rtw_cfg80211_indicate_scan_done(adapter, _TRUE);
 
 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 2)
 	if (wdev->current_bss) {
+#else
+	if (wdev->connected) {
+#endif
 		u8 locally_generated = 1;
 		DBG_871X(FUNC_ADPT_FMT" clear current_bss by cfg80211_disconnected\n", FUNC_ADPT_ARG(adapter));
 		cfg80211_disconnected(adapter->pnetdev, 0, NULL, 0, locally_generated, GFP_ATOMIC);
